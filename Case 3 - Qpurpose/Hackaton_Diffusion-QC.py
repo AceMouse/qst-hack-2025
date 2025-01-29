@@ -5,6 +5,33 @@ from qiskit.circuit.library import QFT, ModularAdderGate
 from qiskit.visualization import plot_histogram
 from qiskit.quantum_info import Statevector
 from qiskit_aer import AerSimulator
+"""import pyqsp
+from pyqsp import angle_sequence, response
+from pyqsp.poly import (polynomial_generators, PolyTaylorSeries)
+deg = 20
+# Specify definite-parity target function for QSP.
+func = lambda x: x**deg
+polydeg = 20 # Desired QSP protocol length.
+max_scale = 0.9 # Maximum norm (<1) for rescaling.
+true_func = lambda x: max_scale * func(x) # For error, include scale.
+
+
+With PolyTaylorSeries class, compute Chebyshev interpolant to degree
+'polydeg' (using twice as many Chebyshev nodes to prevent aliasing).
+
+poly = PolyTaylorSeries().taylor_series(
+    func=func,
+    degree=polydeg,
+    max_scale=max_scale,
+    chebyshev_basis=True,
+    cheb_samples=2*polydeg)
+
+# Compute full phases (and reduced phases, parity) using symmetric QSP.
+(phiset, red_phiset, parity) = angle_sequence.QuantumSignalProcessingPhases(
+    poly,
+    method='sym_qsp',
+    chebyshev_basis=True)
+"""
 # The block encoding is built from three special gates: shift, a special 2 qubit gate prep and a modular adder
 def QFT_Shift_gate(n): #https://egrettathula.wordpress.com/2024/07/28/quantum-incrementer/
     """
@@ -106,6 +133,22 @@ def extract_angle_seq(file = 'QSP_angles.txt'):
             angle_seqs.append(np.array(seq))   
     return angle_seqs
 
+def compute_angle_seq(file = 'QSP_angles.txt'):
+    """
+    Returns a list of angle sequences 
+    angle_seq[k] is the angle sequence of x**(5(k+1))
+    """
+    
+    angle_seqs = []
+    
+    with open(file, 'r') as file:
+        lines = file.readlines()[1:]
+
+        for line in lines:
+            seq = list(map(float, line.strip().split()))
+            angle_seqs.append(np.array(seq))   
+    return angle_seqs
+
 # The following function implements QSVT on the block encoding provided by Block_encoding
 # The full circuit is then simulated with the aer-simulator using Gaussian initial conditions. 
 # A post-selection procedure picks out the successfull runs and arranges the results in a vector
@@ -154,7 +197,6 @@ def Diffusion_QSVT(deg,n,dt,nu,shots = 10**6,show_gate_count = False):
         # Preparing the initial conditions 
         N = 2**n 
         d = 4                                             # spatial domain [0,d]
-        dx = 4/N 
         x = np.linspace(0,d,N,endpoint = False)
         y = np.exp(-20*(x-d/3)**2)                        # Gaussian initial conditions 
         y = y/np.linalg.norm(y)                           # normalized to be a unit vector
@@ -265,6 +307,13 @@ for x in [[QFT_Shift_gate],[MCX_Shift_gate],[QFT_Shift_gate, MCX_Shift_gate]]:
     Shift_implementations = x 
     with open(f"{'_'.join([x.__name__ for x in Shift_implementations])}.dat", "w") as f:
         f.write("deg\tn\tdt\tnu\tgates_q1\tgates_q2\tgates_total\tcircuit_depth\tsucces_rate\n")
-
-    for n in range(2,7):
-        Compare_plots(deg = 20,n = n,dt = 0.05,nu = 0.02, shots = 10**6)
+for n in range(2,20):
+    for x in [[QFT_Shift_gate],[MCX_Shift_gate],[QFT_Shift_gate, MCX_Shift_gate]]:
+        Shift_implementations = x 
+        N = 2**n
+        d = 4                     # Domain [0,d]
+        dx = d/N
+        nu = 0.02
+        dt = ((dx**2)/(2*nu))/2
+        print(f"dt: {dt}")
+        Compare_plots(deg = 20,n = n,dt = dt,nu = nu, shots = 10**6)

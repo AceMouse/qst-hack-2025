@@ -1,3 +1,5 @@
 matplotlib
+numpy
 qiskit
 qiskit_aer
+pyqsp
