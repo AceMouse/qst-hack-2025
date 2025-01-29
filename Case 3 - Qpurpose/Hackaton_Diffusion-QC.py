@@ -1,26 +1,38 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
-from qiskit.circuit.library import QFT, RYGate, RZGate, MCXGate, ModularAdderGate
+from qiskit.circuit.library import QFT, ModularAdderGate
 from qiskit.visualization import plot_histogram
 from qiskit.quantum_info import Statevector
 from qiskit_aer import AerSimulator
-
 # The block encoding is built from three special gates: shift, a special 2 qubit gate prep and a modular adder
-
-def Shift_gate(n):
+def QFT_Shift_gate(n):
     """
     n : number of qubits.
     
     Returns a gate implementing the shift operation  
     |k> --> |k+1 (mod 2**n)> in the computational basis.
     """
-    qc = QuantumCircuit(n,name = 'Shift')
+    circuit = QuantumCircuit(n, name= 'QFTShift')
+    circuit.compose(QFT(n, inverse=False, do_swaps=False, name='QFT'), range(n), inplace=True)
+    for m in range(n):
+        circuit.p(np.pi / (2 ** m), m)
+    circuit.compose(QFT(n, inverse=True, do_swaps=False, name='QFT'), range(n), inplace=True)
+    return circuit.to_gate()
+
+def MCX_Shift_gate(n):
+    """
+    n : number of qubits.
+    
+    Returns a gate implementing the shift operation  
+    |k> --> |k+1 (mod 2**n)> in the computational basis.
+    """
+    qc = QuantumCircuit(n,name = 'MCXShift')
     for j in range(n-1):
         qc.mcx([k for k in range(n-1-j)],n-1-j)         # Using multi controlled NOT gates 
     qc.x(0)
     return qc.to_gate()
-    
+Shift_implementations = [QFT_Shift_gate, MCX_Shift_gate] 
 def Diffusion_prep(n,dt,nu):
     """
     n: number of spatial qubits. N = 2**n is the number of spatial grid points. 
@@ -43,7 +55,7 @@ def Diffusion_prep(n,dt,nu):
     qc.ch(0,1,ctrl_state = '0')          # Controlled Hadamard gate 
     return qc.to_gate()
 
-def Block_encoding(n,dt,nu):
+def Block_encoding(n,dt,nu,shift_implementation):
     """
     n : number of spatial qubits
     dt : timestep
@@ -60,7 +72,7 @@ def Block_encoding(n,dt,nu):
     
     # Preparing the needed gates 
     G = Diffusion_prep(n,dt,nu)
-    S = Shift_gate(n)
+    S = shift_implementation(n)
     adder = ModularAdderGate(n)
     
     # Constructing the circuit 
@@ -121,73 +133,85 @@ def Diffusion_QSVT(deg,n,dt,nu,shots = 10**6,show_gate_count = False):
 
     Returns x,z the spatial grid values and the simulated y values in z. 
     """
-    # Setting up the circuit 
-    qra = QuantumRegister(1)      # Ancilla register on 1 qubit used in QSVT 
-    qr1 = QuantumRegister(n)      # qr1 and qr2 are the same as in Block_encoding 
-    qr2 = QuantumRegister(n)
-    
-    cra = ClassicalRegister(1)
-    cr1 = ClassicalRegister(n)
-    cr2 = ClassicalRegister(n)
-    
-    qc = QuantumCircuit(qra,qr1,qr2,cra,cr1,cr2)
-    
-    # Preparing the initial conditions 
-    N = 2**n 
-    d = 4                                             # spatial domain [0,d]
-    dx = 4/N 
-    x = np.linspace(0,d,N,endpoint = False)
-    y = np.exp(-20*(x-d/3)**2)                        # Gaussian initial conditions 
-    y = y/np.linalg.norm(y)                           # normalized to be a unit vector
-    qc.prepare_state(Statevector(y),qr2)
-    
-    U = Block_encoding(n,dt,nu)                       # Block encoding circuit 
-    Phi = extract_angle_seq()[int(deg/5)-1]           # Extracting the angle sequence  
-    
-    # Applying the QSVT circuit 
-    qc.h(qra[0])
-    s = 0
-    for k in range(len(Phi)-1,-1,-1):
-        if s == 0:
-            qc.append(U,qr1[:]+qr2[:])
-            s = 1
-        else:
-            qc.append(U.inverse(),qr1[:]+qr2[:])
-            s = 0
-        qc.mcx(qr1[:],qra[0],ctrl_state = n*'0')
-        qc.rz(2*Phi[k],qra[0])
-        qc.mcx(qr1[:],qra[0],ctrl_state = n*'0')
-    qc.h(qra[0])
-    
-    # Measurements
-    qc.measure(qra,cra)
-    qc.measure(qr1,cr1)
-    qc.measure(qr2,cr2)
-    
-    # Running the circuit     
     sim = AerSimulator()
-    qc_comp = transpile(qc,sim)
-    res = sim.run(qc_comp,shots = shots).result()
-    counts = res.get_counts(0)
-    
-    # Printing gate counts 
-    if show_gate_count:
-        dict = qc_comp.count_ops()
+    min_depth = 0
+    min_idx = 0
+    qc_comps = []
+    depths = []
+    qcs = []
+    gates = []
+    for idx,shift_implementation in enumerate(Shift_implementations): 
+        # Setting up the circuit 
+        qra = QuantumRegister(1)      # Ancilla register on 1 qubit used in QSVT 
+        qr1 = QuantumRegister(n)      # qr1 and qr2 are the same as in Block_encoding 
+        qr2 = QuantumRegister(n)
+        
+        cra = ClassicalRegister(1)
+        cr1 = ClassicalRegister(n)
+        cr2 = ClassicalRegister(n)
+        
+        qc = QuantumCircuit(qra,qr1,qr2,cra,cr1,cr2)
+        
+        # Preparing the initial conditions 
+        N = 2**n 
+        d = 4                                             # spatial domain [0,d]
+        dx = 4/N 
+        x = np.linspace(0,d,N,endpoint = False)
+        y = np.exp(-20*(x-d/3)**2)                        # Gaussian initial conditions 
+        y = y/np.linalg.norm(y)                           # normalized to be a unit vector
+        qc.prepare_state(Statevector(y),qr2)
+        U = Block_encoding(n,dt,nu,shift_implementation)                       # Block encoding circuit 
+        Phi = extract_angle_seq()[int(deg/5)-1]           # Extracting the angle sequence  
+        
+        # Applying the QSVT circuit 
+        qc.h(qra[0])
+        s = 0
+        for k in range(len(Phi)-1,-1,-1):
+            if s == 0:
+                qc.append(U,qr1[:]+qr2[:])
+                s = 1
+            else:
+                qc.append(U.inverse(),qr1[:]+qr2[:])
+                s = 0
+            qc.mcx(qr1[:],qra[0],ctrl_state = n*'0')
+            qc.rz(2*Phi[k],qra[0])
+            qc.mcx(qr1[:],qra[0],ctrl_state = n*'0')
+        qc.h(qra[0])
+        
+        # Measurements
+        qc.measure(qra,cra)
+        qc.measure(qr1,cr1)
+        qc.measure(qr2,cr2)
+        
+        # Running the circuit     
+        qc_comp = transpile(qc,sim)
+        depth = qc_comp.depth()
         gate_1q = 0
         gate_2q = 0
+        if depth <= min_depth:
+            min_depth = depth
+            min_idx = idx
+        dict = qc_comp.count_ops()
         for key in dict:
             if key[0] == 'c':
                 gate_2q += dict[key]
             elif key != 'measure':
                 gate_1q += dict[key]
-            
-        print("1 qubit gates:", gate_1q)
-        print("2 qubit gates:", gate_2q)
-        print("Total:", gate_1q+gate_2q)
 
-        print('Circuit depth after transpiling:', qc_comp.depth())
+        qc_comps += [qc_comp]
+        depths += [depth]
+        qcs += [qc]
+        gates += [(gate_1q, gate_2q)]
+
+    if show_gate_count:
+        print("1 qubit gates:", gates[min_idx][0])
+        print("2 qubit gates:", gates[min_idx][1])
+        print("Total:", sum(gates[min_idx]))
+        print('Circuit depth after transpiling:', qc_comps[min_idx].depth())
         
     # Postselection
+    res = sim.run(qc_comps[min_idx],shots = shots).result()
+    counts = res.get_counts(0)
     select = (n+1)*'0'
     total = 0                      # Tracks the number of successfull outcomes
     z = np.zeros(N)                # The results are encoded in z 
@@ -218,7 +242,8 @@ def Euler_cl(deg,n,dt,nu):
     b = dt*nu/dx**2
     a = 1-2*dt*nu/(dx**2)
     B = b*np.diag(np.ones(N-1),-1)+a*np.diag(np.ones(N),0)+b*np.diag(np.ones(N-1),1)
-    B[0][-1] = b; B[-1][0] = b
+    B[0][-1] = b 
+    B[-1][0] = b
     
     y = np.exp(-20*(x-d/3)**2)
     y = y/np.linalg.norm(y)
@@ -236,4 +261,9 @@ def Compare_plots(deg = 10,n = 5,dt = 0.1,nu = 0.02,shots = 10**6):
     plt.legend(['Classical T=0','Classical T='+str(T),'Quantum T='+str(T)])
     plt.show()
 
-Compare_plots(deg = 10,n = 6,dt = 0.05,nu = 0.02, shots = 10**6)
+for n in range(1,7):
+    try:
+        Compare_plots(deg = 10,n = n,dt = 0.05,nu = 0.02, shots = 10**6)
+        print(f"Succes: {n}")
+    except Exception:
+        pass
