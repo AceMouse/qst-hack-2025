@@ -225,7 +225,7 @@ def Diffusion_QSVT(deg,n,dt,nu,shots = 10**6,show_gate_count = False):
         qc.measure(qr2,cr2)
         
         # Running the circuit     
-        qc_comp = transpile(qc,sim)
+        qc_comp = transpile(qc,sim,optimization_level=3)
         depth = qc_comp.depth()
         gate_1q = 0
         gate_2q = 0
@@ -294,20 +294,23 @@ def Euler_cl(deg,n,dt,nu):
     w = np.matmul(C,y)
     return x,y,w 
 
-def Compare_plots(deg = 10,n = 5,dt = 0.1,nu = 0.02,shots = 10**6):
+def Compare_plots(deg = 10,n = 5,dt = 0.1,nu = 0.02,shots = 10**6, plot=False):
     # Plots the initial distribution and the results of the classical and quantum simulations at t = deg*dt  
     x,y,w = Euler_cl(deg,n,dt,nu)  
     x,z = Diffusion_QSVT(deg,n,dt,nu,shots = shots, show_gate_count = True)
     T = deg*dt 
-    plt.plot(x,y,x,w,x,z)
-    plt.legend(['Classical T=0','Classical T='+str(T),'Quantum T='+str(T)])
-#    plt.show()
-Shift_implementations = []
+    if (plot):
+        plt.plot(x,y,x,w,x,z)
+        plt.legend(['Classical T=0','Classical T='+str(T),'Quantum T='+str(T)])
+        plt.show()
+
+Shift_implementations = [QFT_Shift_gate, MCX_Shift_gate]
+Compare_plots(deg = 10,n = 6,dt = 0.05,nu = 0.02, shots = 10**6, plot=True)
 for x in [[QFT_Shift_gate],[MCX_Shift_gate],[QFT_Shift_gate, MCX_Shift_gate]]:
     Shift_implementations = x 
     with open(f"{'_'.join([x.__name__ for x in Shift_implementations])}.dat", "w") as f:
         f.write("deg\tn\tdt\tnu\tgates_q1\tgates_q2\tgates_total\tcircuit_depth\tsucces_rate\n")
-for n in range(2,20):
+for n in range(2,10):
     for x in [[QFT_Shift_gate],[MCX_Shift_gate],[QFT_Shift_gate, MCX_Shift_gate]]:
         Shift_implementations = x 
         N = 2**n
