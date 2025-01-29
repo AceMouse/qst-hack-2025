@@ -6,7 +6,7 @@ from qiskit.visualization import plot_histogram
 from qiskit.quantum_info import Statevector
 from qiskit_aer import AerSimulator
 # The block encoding is built from three special gates: shift, a special 2 qubit gate prep and a modular adder
-def QFT_Shift_gate(n):
+def QFT_Shift_gate(n): #https://egrettathula.wordpress.com/2024/07/28/quantum-incrementer/
     """
     n : number of qubits.
     
@@ -32,7 +32,6 @@ def MCX_Shift_gate(n):
         qc.mcx([k for k in range(n-1-j)],n-1-j)         # Using multi controlled NOT gates 
     qc.x(0)
     return qc.to_gate()
-Shift_implementations = [QFT_Shift_gate, MCX_Shift_gate] 
 def Diffusion_prep(n,dt,nu):
     """
     n: number of spatial qubits. N = 2**n is the number of spatial grid points. 
@@ -134,7 +133,7 @@ def Diffusion_QSVT(deg,n,dt,nu,shots = 10**6,show_gate_count = False):
     Returns x,z the spatial grid values and the simulated y values in z. 
     """
     sim = AerSimulator()
-    min_depth = 0
+    min_depth = 1_000_000_000
     min_idx = 0
     qc_comps = []
     depths = []
@@ -202,12 +201,11 @@ def Diffusion_QSVT(deg,n,dt,nu,shots = 10**6,show_gate_count = False):
         depths += [depth]
         qcs += [qc]
         gates += [(gate_1q, gate_2q)]
-
-    if show_gate_count:
-        print("1 qubit gates:", gates[min_idx][0])
-        print("2 qubit gates:", gates[min_idx][1])
-        print("Total:", sum(gates[min_idx]))
-        print('Circuit depth after transpiling:', qc_comps[min_idx].depth())
+    #if show_gate_count:
+    #    print("1 qubit gates:", gates[min_idx][0])
+    #    print("2 qubit gates:", gates[min_idx][1])
+    #    print("Total:", sum(gates[min_idx]))
+    #    print('Circuit depth after transpiling:', depths[min_idx])
         
     # Postselection
     res = sim.run(qc_comps[min_idx],shots = shots).result()
@@ -221,7 +219,9 @@ def Diffusion_QSVT(deg,n,dt,nu,shots = 10**6,show_gate_count = False):
             z[int(L[0],2)] = np.sqrt(counts[key]/shots)    # By construction all amplitudes are positive real numbers
             total += counts[key]                           # so this actually recovers them!
     success_rate = total/shots
-    print('Success rate =', success_rate)
+    #print('Success rate =', success_rate)
+    with open(f"{'_'.join([x.__name__ for x in Shift_implementations])}.dat", "a") as f:
+        f.write(f"{deg}\t{n}\t{dt}\t{nu}\t{gates[min_idx][0]}\t{gates[min_idx][1]}\t{sum(gates[min_idx])}\t{depths[min_idx]}\t{success_rate}\n")
     return x,z
 
 def Euler_cl(deg,n,dt,nu):
@@ -259,11 +259,12 @@ def Compare_plots(deg = 10,n = 5,dt = 0.1,nu = 0.02,shots = 10**6):
     T = deg*dt 
     plt.plot(x,y,x,w,x,z)
     plt.legend(['Classical T=0','Classical T='+str(T),'Quantum T='+str(T)])
-    plt.show()
+#    plt.show()
+Shift_implementations = []
+for x in [[QFT_Shift_gate],[MCX_Shift_gate],[QFT_Shift_gate, MCX_Shift_gate]]:
+    Shift_implementations = x 
+    with open(f"{'_'.join([x.__name__ for x in Shift_implementations])}.dat", "w") as f:
+        f.write("deg\tn\tdt\tnu\tgates_q1\tgates_q2\tgates_total\tcircuit_depth\tsucces_rate\n")
 
-for n in range(1,7):
-    try:
-        Compare_plots(deg = 10,n = n,dt = 0.05,nu = 0.02, shots = 10**6)
-        print(f"Succes: {n}")
-    except Exception:
-        pass
+    for n in range(2,7):
+        Compare_plots(deg = 20,n = n,dt = 0.05,nu = 0.02, shots = 10**6)
